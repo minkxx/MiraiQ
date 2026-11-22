@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.base import RegressorMixin
+from sklearn.ensemble import (
+    GradientBoostingRegressor,
+    HistGradientBoostingRegressor,
+    RandomForestRegressor,
+)
+from sklearn.inspection import permutation_importance
+from sklearn.linear_model import Ridge
 from sklearn.model_selection import KFold, cross_val_score
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from src.anilist.models import (
     AnimeFeatures,
@@ -142,6 +151,65 @@ class FeatureExtractor:
         return len(self._feature_names)
 
 
+def _final_estimator(pipeline: Pipeline) -> Any:
+    """Resolve the actual estimator from a pipeline.
+
+    Unwraps nested pipelines (e.g. ridge wrapped in a scaler pipeline) and
+    accepts the old "gbr"/"ridge" step names for compatibility with saved models.
+    Falls back to the final pipeline step if none of the known names match.
+    """
+    model = (
+        pipeline.named_steps.get("reg")
+        or pipeline.named_steps.get("gbr")
+        or pipeline.named_steps.get("ridge")
+    )
+    if model is None and pipeline.steps:
+        model = pipeline.steps[-1][1]
+    if isinstance(model, Pipeline):
+        model = model.steps[-1][1]
+    return model
+
+
+def _default_regressor() -> GradientBoostingRegressor:
+    """The regressor MiraiQ trained with historically (kept as the default)."""
+    return GradientBoostingRegressor(
+        n_estimators=500,
+        learning_rate=0.05,
+        max_depth=3,
+        min_samples_leaf=5,
+        subsample=0.8,
+        validation_fraction=0.1,
+        n_iter_no_change=20,
+        random_state=42,
+    )
+
+
+REGRESSORS: dict[str, Callable[[], RegressorMixin | Pipeline]] = {
+    "gbr": _default_regressor,
+    "hist_gbr": lambda: HistGradientBoostingRegressor(
+        max_iter=300,
+        learning_rate=0.05,
+        max_depth=3,
+        min_samples_leaf=8,
+        l2_regularization=0.5,
+        max_leaf_nodes=15,
+        random_state=42,
+    ),
+    "random_forest": lambda: RandomForestRegressor(
+        n_estimators=400,
+        min_samples_leaf=5,
+        random_state=42,
+        n_jobs=-1,
+    ),
+    "ridge": lambda: Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("ridge", Ridge(alpha=10.0)),
+        ]
+    ),
+}
+
+
 class TasteModel:
     """Personalized anime rating prediction model."""
 
@@ -152,6 +220,7 @@ class TasteModel:
         include_format: bool = False,
         include_source: bool = False,
         include_metadata: bool = True,
+        regressor_factory: Callable[[], RegressorMixin | Pipeline] | None = None,
     ):
         self.feature_extractor = FeatureExtractor(
             tag_threshold=tag_threshold,
@@ -160,6 +229,7 @@ class TasteModel:
             include_source=include_source,
             include_metadata=include_metadata,
         )
+        self._regressor_factory = regressor_factory or _default_regressor
         self.pipeline: Pipeline | None = None
         self._is_trained = False
         # Calibration: track prediction statistics
@@ -185,10 +255,6 @@ class TasteModel:
         """
         media_by_id = {m.id: m for m in media_catalog}
 
-        X_train = []
-        y_train = []
-        sample_weights = []
-
         rated_count = 0
         dropped_count = 0
 
@@ -196,21 +262,9 @@ class TasteModel:
             media = media_by_id.get(entry.media_id)
             if not media:
                 continue
-
-            features = self.feature_extractor.transform(media)
-            feature_vector = self.get_feature_vector(features)
-
             if entry.is_rated:
-                X_train.append(feature_vector)
-                y_train.append(entry.score)
-                sample_weights.append(1.0)
                 rated_count += 1
             elif entry.is_negative_signal:
-                # Negative signal: user dropped this anime
-                # Treat as low rating (2.0/10) with lower weight
-                X_train.append(feature_vector)
-                y_train.append(2.0)
-                sample_weights.append(0.3)
                 dropped_count += 1
 
         if rated_count < min_ratings:
@@ -219,41 +273,52 @@ class TasteModel:
                 f"Found {rated_count} rated + {dropped_count} dropped."
             )
 
-        X = np.array(X_train, dtype=np.float32)
-        y = np.array(y_train, dtype=np.float32)
-        weights = np.array(sample_weights, dtype=np.float32)
-
         # Fit feature extractor on full catalog first
         self.feature_extractor.fit(media_catalog)
 
-        # Re-extract features with fitted extractor (only for training samples)
+        # Extract features with the fitted extractor (only for training samples)
         X_train = []
+        y_train = []
+        sample_weights = []
         for entry in user_entries:
             media = media_by_id.get(entry.media_id)
             if not media:
                 continue
-            if entry.is_rated or entry.is_negative_signal:
-                features = self.feature_extractor.transform(media)
-                X_train.append(self.get_feature_vector(features))
+            if not (entry.is_rated or entry.is_negative_signal):
+                continue
+            features = self.feature_extractor.transform(media)
+            X_train.append(self.get_feature_vector(features))
+            if entry.is_rated:
+                y_train.append(entry.score)
+                sample_weights.append(1.0)
+            else:
+                # Negative signal: user dropped this anime
+                # Treat as low rating (2.0/10) with lower weight
+                y_train.append(2.0)
+                sample_weights.append(0.3)
 
         X = np.array(X_train, dtype=np.float32)
+        y = np.array(y_train, dtype=np.float32)
+        weights = np.array(sample_weights, dtype=np.float32)
 
-        gbr = GradientBoostingRegressor(
-            n_estimators=500,
-            learning_rate=0.05,
-            max_depth=3,
-            min_samples_leaf=5,
-            subsample=0.8,
-            validation_fraction=0.1,
-            n_iter_no_change=20,
-            random_state=42,
-        )
-        self.pipeline = Pipeline(
-            [
-                ("gbr", gbr),
-            ]
-        )
-        self.pipeline.fit(X, y, gbr__sample_weight=weights)
+        # Keep a copy of the training matrix so taste drivers can be computed
+        # for estimators that expose neither feature_importances_ nor coef_
+        # (e.g. HistGradientBoostingRegressor) via permutation importance.
+        self._X_train = X
+        self._y_train = y
+
+        regressor = self._regressor_factory()
+        if isinstance(regressor, Pipeline):
+            # e.g. ridge with an internal StandardScaler: target the last step.
+            self.pipeline = regressor
+            step_name = list(regressor.named_steps.keys())[-1]
+        else:
+            self.pipeline = Pipeline([("reg", regressor)])
+            step_name = "reg"
+        fit_params: dict[str, Any] = {}
+        if not np.allclose(weights, 1.0):
+            fit_params[f"{step_name}__sample_weight"] = weights
+        self.pipeline.fit(X, y, **fit_params)
 
         self._is_trained = True
 
@@ -276,8 +341,8 @@ class TasteModel:
 
         train_rmse = np.sqrt(np.mean((y - y_pred) ** 2))
 
-        gbr_model = self.pipeline.named_steps["gbr"]
-        feature_weights = gbr_model.feature_importances_
+        reg_model = _final_estimator(self.pipeline)
+        feature_weights = self._feature_importances(reg_model)
 
         # Calibration: compute prediction intervals
         residuals = y - y_pred
@@ -293,6 +358,32 @@ class TasteModel:
             "feature_weights": feature_weights,
             "residual_std": residual_std,
         }
+
+    def _feature_importances(self, reg_model: Any) -> np.ndarray:
+        """Return per-feature importance weights for the fitted estimator.
+
+        Uses native ``feature_importances_`` / ``coef_`` when available, falling
+        back to permutation importance for estimators (e.g.
+        HistGradientBoostingRegressor) that expose neither.
+        """
+        n_features = len(self.feature_extractor.get_feature_names())
+        if hasattr(reg_model, "feature_importances_"):
+            return np.asarray(reg_model.feature_importances_, dtype=float)
+        if hasattr(reg_model, "coef_"):
+            return np.abs(np.asarray(reg_model.coef_, dtype=float)).ravel()
+        if self._X_train is not None and self._y_train is not None:
+            result = permutation_importance(
+                reg_model,
+                self._X_train,
+                self._y_train,
+                n_repeats=5,
+                random_state=42,
+            )
+            importances = getattr(result, "importances_mean", None)
+            if importances is None:
+                importances = np.zeros(n_features, dtype=float)
+            return np.abs(np.asarray(importances, dtype=float))
+        return np.zeros(n_features, dtype=float)
 
     def get_feature_vector(self, features: AnimeFeatures) -> np.ndarray:
         return features.to_vector(self.feature_extractor.get_feature_names())
@@ -315,8 +406,8 @@ class TasteModel:
         features = self.feature_extractor.transform(media)
         feature_vector = self.get_feature_vector(features).reshape(1, -1)
         prediction = self.pipeline.predict(feature_vector)[0]
-        # Don't clamp - let it go above 10 for better ranking
-        # prediction = float(np.clip(prediction, 0.0, 10.0))
+        # Clamp to the 0-10 rating scale; raw out-of-range values are not real ratings.
+        prediction = float(np.clip(prediction, 0.0, 10.0))
 
         # Confidence based on training residual std (if available)
         confidence = 1.0  # Default
@@ -338,7 +429,7 @@ class TasteModel:
 
         X = np.array(feature_vectors, dtype=np.float32)
         predictions = self.pipeline.predict(X)
-        return [float(p) for p in predictions]  # No clamp - let ranking be natural
+        return [float(np.clip(p, 0.0, 10.0)) for p in predictions]
 
     def predict_batch_with_confidence(
         self, media_list: list[CachedMedia]
@@ -360,8 +451,8 @@ class TasteModel:
 
         feature_names = self.feature_extractor.get_feature_names()
 
-        gbr_model = self.pipeline.named_steps["gbr"]
-        weights = gbr_model.feature_importances_
+        reg_model = _final_estimator(self.pipeline)
+        weights = self._feature_importances(reg_model)
 
         drivers = []
         for name, weight in zip(feature_names, weights, strict=False):
@@ -396,7 +487,7 @@ class TasteModel:
                     weight=float(weight),
                     feature_type=feature_type,
                     description=description,
-                    is_positive=weight > 0,
+                    is_positive=bool(weight > 0),
                 )
             )
 
@@ -414,8 +505,13 @@ class TasteModel:
         feature_vector = self.get_feature_vector(features)
         feature_names = self.feature_extractor.get_feature_names()
 
-        gbr_model = self.pipeline.named_steps["gbr"]
-        weights = gbr_model.feature_importances_
+        reg_model = _final_estimator(self.pipeline)
+        if hasattr(reg_model, "feature_importances_"):
+            weights = reg_model.feature_importances_
+        elif hasattr(reg_model, "coef_"):
+            weights = reg_model.coef_
+        else:
+            weights = np.zeros(len(feature_names))
 
         contributions = []
         for i, (name, value) in enumerate(zip(feature_names, feature_vector, strict=False)):
@@ -465,6 +561,8 @@ def train_model(
     include_format: bool = False,
     include_source: bool = False,
     include_metadata: bool = True,
+    regressor_factory: Callable[[], RegressorMixin | Pipeline] | None = None,
+    model_name: str | None = None,
 ) -> tuple[TasteModel, dict[str, Any]]:
     """Train a taste model for a user from cached data."""
     user_entries = cache_manager.load_user_entries(username)
@@ -481,11 +579,14 @@ def train_model(
         include_format=include_format,
         include_source=include_source,
         include_metadata=include_metadata,
+        regressor_factory=regressor_factory,
     )
     metrics = model.train(user_entries, media_catalog, min_ratings=min_ratings)
 
-    cache_manager.save_model(username, model.pipeline, model.feature_extractor.get_feature_names())
+    cache_manager.save_model(
+        username, model.pipeline, model.feature_extractor.get_feature_names(), model_name=model_name
+    )
     taste_drivers = model.get_taste_drivers(top_k=50)
-    cache_manager.save_taste_drivers(username, taste_drivers)
+    cache_manager.save_taste_drivers(username, taste_drivers, model_name=model_name)
 
     return model, metrics

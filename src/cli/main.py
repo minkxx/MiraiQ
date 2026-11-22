@@ -12,11 +12,13 @@ from rich.table import Table
 
 from src.anilist.sync import run_fetch_catalog, run_sync
 from src.cache.cache import CacheManager
+from src.model.evaluate import evaluate as run_evaluation
+from src.model.evaluate import format_report
 from src.model.recommender import (
     RecommendationFilters,
     load_engine,
 )
-from src.model.trainer import train_model
+from src.model.trainer import REGRESSORS, train_model
 
 app = typer.Typer(
     name="miraiq",
@@ -138,6 +140,13 @@ def train(
         bool,
         typer.Option("--include-metadata", help="Include year/episodes/popularity as features"),
     ] = True,
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            help=f"Regressor to train: {', '.join(REGRESSORS)}",
+        ),
+    ] = "gbr",
 ) -> None:
     """Train your personal taste model from cached data."""
     cache_manager = get_cache_manager(cache_dir)
@@ -153,9 +162,15 @@ def train(
     if cache_manager.model_exists(username):
         console.print("[yellow]Model already exists. Re-training...[/yellow]")
 
+    if model not in REGRESSORS:
+        console.print(
+            f"[bold red]Unknown model '{model}'. Choose from: {', '.join(REGRESSORS)}[/bold red]"
+        )
+        sys.exit(1)
+
     try:
         with console.status("[bold green]Training taste model..."):
-            model, metrics = train_model(
+            model_obj, metrics = train_model(
                 username,
                 cache_manager,
                 min_ratings=min_ratings,
@@ -164,6 +179,8 @@ def train(
                 include_format=include_format,
                 include_source=include_source,
                 include_metadata=include_metadata,
+                regressor_factory=REGRESSORS[model],
+                model_name=model,
             )
 
         console.print(
@@ -187,21 +204,88 @@ def train(
 
 
 @app.command()
+def evaluate(
+    username: Annotated[str, typer.Argument(help="AniList username")],
+    cache_dir: Annotated[
+        str, typer.Option("--cache-dir", "-c", help="Cache directory")
+    ] = DEFAULT_CACHE_DIR,
+    test_size: Annotated[
+        float,
+        typer.Option("--test-size", help="Fraction of rated anime held out for validation"),
+    ] = 0.2,
+    n_splits: Annotated[
+        int, typer.Option("--n-splits", help="Number of CV folds (random split only)")
+    ] = 5,
+    temporal: Annotated[
+        bool,
+        typer.Option(
+            "--temporal",
+            help="Train on older anime and predict newer ones (single time-based split)",
+        ),
+    ] = False,
+) -> None:
+    """Evaluate prediction accuracy with hold-out validation (offline, no API calls).
+
+    Holds out some of your rated anime, trains on the rest, and reports
+    RMSE/MAE per regressor plus hit-rate @N (how often held-out anime
+    appear in top-N predictions). Use the results to pick the best
+    regressor for 'miraiq train --model <name>'.
+    """
+    cache_manager = get_cache_manager(cache_dir)
+
+    if not cache_manager.cache_exists(username):
+        console.print(f"[red]No cache found for {username}. Run 'miraiq sync' first.[/red]")
+        sys.exit(1)
+
+    if not cache_manager.global_catalog_exists():
+        console.print("[red]No global catalog found. Run 'miraiq fetch-catalog' first.[/red]")
+        sys.exit(1)
+
+    try:
+        with console.status("[bold green]Evaluating models..."):
+            report = run_evaluation(
+                username,
+                cache_manager,
+                test_size=test_size,
+                n_splits=n_splits,
+                temporal=temporal,
+            )
+    except ValueError as e:
+        console.print(f"[bold red]Evaluation failed:[/bold red] {e}")
+        sys.exit(1)
+
+    console.print("\n[bold cyan]Offline Evaluation Results[/bold cyan]\n")
+    console.print(format_report(report))
+
+
+@app.command()
 def taste(
     username: Annotated[str, typer.Argument(help="AniList username")],
     cache_dir: Annotated[
         str, typer.Option("--cache-dir", "-c", help="Cache directory")
     ] = DEFAULT_CACHE_DIR,
     top: Annotated[int, typer.Option("--top", "-t", help="Number of top drivers to show")] = 15,
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            help=f"Trained model to show drivers for: {', '.join(REGRESSORS)}",
+        ),
+    ] = "gbr",
 ) -> None:
     """Display your learned taste drivers (what you like/dislike)."""
     cache_manager = get_cache_manager(cache_dir)
 
-    if not cache_manager.model_exists(username):
-        console.print(f"[red]No trained model for {username}. Run 'miraiq train' first.[/red]")
+    if not cache_manager.model_exists(username, model_name=model):
+        available = cache_manager.list_available_models(username)
+        hint = f" Available models: {available}." if available else ""
+        console.print(
+            f"[red]No trained model '{model}' for {username}. "
+            f"Run 'miraiq train --model {model}' first.{hint}[/red]"
+        )
         sys.exit(1)
 
-    drivers = cache_manager.load_taste_drivers(username)
+    drivers = cache_manager.load_taste_drivers(username, model_name=model)
 
     if not drivers:
         console.print("[yellow]No taste drivers found.[/yellow]")
@@ -296,6 +380,13 @@ def recommend(
             help="Include Chinese/Korean anime (excluded by default)",
         ),
     ] = False,
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            help=f"Trained model to use for recommendations: {', '.join(REGRESSORS)}",
+        ),
+    ] = "gbr",
 ) -> None:
     """Get personalized anime recommendations."""
     cache_manager = get_cache_manager(cache_dir)
@@ -309,7 +400,7 @@ def recommend(
         sys.exit(1)
 
     try:
-        engine = load_engine(username, cache_dir)
+        engine = load_engine(username, cache_dir, model_name=model)
     except ValueError as e:
         console.print(f"[bold red]{e}[/bold red]")
         sys.exit(1)
@@ -603,7 +694,10 @@ def info(
     table.add_row("Media Catalog", "[OK]" if info["media_catalog"] else "[X]")
     table.add_row("User Entries", "[OK]" if info["user_entries"] else "[X]")
     table.add_row("Metadata", "[OK]" if info["metadata"] else "[X]")
-    table.add_row("Trained Model", "[OK]" if info["model"] else "[X]")
+    if info.get("available_models"):
+        table.add_row("Trained Models", ", ".join(info["available_models"]))
+    else:
+        table.add_row("Trained Models", "[X]")
 
     if "synced_at" in info:
         table.add_row("Last Synced", info["synced_at"])

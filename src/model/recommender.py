@@ -73,14 +73,19 @@ class RecommendationEngine:
         self._completed_ids: set[int] = set()
         self._planning_ids: set[int] = set()
 
-    def load(self, username: str) -> None:
+    def load(self, username: str, model_name: str | None = None) -> None:
         """Load model and data for a user."""
         self.username = username
 
         # Load model
-        model_data = self.cache_manager.load_model(username)
+        model_data = self.cache_manager.load_model(username, model_name=model_name)
         if not model_data:
-            raise ValueError(f"No trained model found for {username}. Run 'miraiq train' first.")
+            available = self.cache_manager.list_available_models(username)
+            hint = f" Available models: {available}." if available else ""
+            raise ValueError(
+                f"No trained model '{model_name or 'gbr'}' found for {username}. "
+                f"Run 'miraiq train' first.{hint}"
+            )
 
         pipeline, feature_names = model_data
         self.model = TasteModel()
@@ -265,7 +270,7 @@ class RecommendationEngine:
                     # Boost up to +0.5 based on similarity to highly-rated watched anime
                     boost += sim["similarity"] * 0.5 * (sim["watched_score"] / 10.0)
             boost = min(boost, 0.5)  # Cap the boost
-            boosted_scores.append(pred_score + boost)
+            boosted_scores.append(min(max(pred_score + boost, 0.0), 10.0))  # Clamp to 0-10
 
         # Build results
         results = []
@@ -347,9 +352,11 @@ class RecommendationEngine:
         return [(tag, rank) for tag, rank in all_tags if query in tag.lower()]
 
 
-def load_engine(username: str, cache_dir: str = "~/.miraiq/cache") -> RecommendationEngine:
+def load_engine(
+    username: str, cache_dir: str = "~/.miraiq/cache", model_name: str | None = None
+) -> RecommendationEngine:
     """Convenience function to load recommendation engine."""
     cache_manager = CacheManager(cache_dir)
     engine = RecommendationEngine(cache_manager)
-    engine.load(username)
+    engine.load(username, model_name=model_name)
     return engine
