@@ -8,6 +8,27 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel, Field
 
+# Python 3.14 + Pydantic v2.14.4: annotation evaluation of forward references
+# (e.g. "X | None") can fail with TypeError when Pydantic's try_eval_type calls
+# typing._eval_type with prefer_fwd_module=True. Pydantic's try_eval_type only
+# catches NameError, not TypeError, so we patch it to catch TypeError as well,
+# allowing Pydantic to defer evaluation of unresolvable forward refs.
+from pydantic._internal import _typing_extra
+
+_orig_try_eval_type = _typing_extra.try_eval_type
+
+
+def _patched_try_eval_type(value, globalns, localns):
+    try:
+        return _orig_try_eval_type(value, globalns, localns)
+    except TypeError:
+        # Return the annotation unevaluated; Pydantic will handle deferred
+        # forward references during model construction.
+        return _typing_extra._type_convert(value), False
+
+
+_typing_extra.try_eval_type = _patched_try_eval_type
+
 
 class MediaFormat(str, Enum):
     TV = "TV"
@@ -305,15 +326,6 @@ class MediaListEntry(BaseModel):
         return self.status == "DROPPED"
 
 
-class User(BaseModel):
-    id: int
-    name: str
-    avatar: UserAvatar | None = None
-    about: str | None = None
-    siteUrl: str | None = None
-    mediaListOptions: MediaListOptions | None = None
-
-
 class UserAvatar(BaseModel):
     large: str | None = None
     medium: str | None = None
@@ -324,6 +336,15 @@ class MediaListOptions(BaseModel):
     rowOrder: str | None = None
 
 
+class User(BaseModel):
+    id: int
+    name: str
+    avatar: UserAvatar | None = None
+    about: str | None = None
+    siteUrl: str | None = None
+    mediaListOptions: MediaListOptions | None = None
+
+
 class PageInfo(BaseModel):
     total: int
     perPage: int
@@ -332,14 +353,14 @@ class PageInfo(BaseModel):
     hasNextPage: bool
 
 
-class MediaListCollection(BaseModel):
-    user: User
-    lists: list[MediaListGroup] = Field(default_factory=list)
-
-
 class MediaListGroup(BaseModel):
     status: str | None = None  # Can be standard status, custom list name, or null
     entries: list[MediaListEntry] = Field(default_factory=list)
+
+
+class MediaListCollection(BaseModel):
+    user: User
+    lists: list[MediaListGroup] = Field(default_factory=list)
 
 
 class Page(BaseModel):
@@ -350,7 +371,7 @@ class Page(BaseModel):
 
 # GraphQL Response wrappers
 class UserResponse(BaseModel):
-    User: User | None = None
+    User: Any = None
 
 
 class MediaListResponse(BaseModel):
