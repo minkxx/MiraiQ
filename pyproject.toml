@@ -57,14 +57,6 @@ include = ["miraiq*"]
 line-length = 100
 target-version = ['py310']
 
-[tool.ruff]
-line-length = 100
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "W", "UP", "B", "C4", "PTH", "SIM", "T20"]
-ignore = ["S101", "PTH118", "PTH123"]
-
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
