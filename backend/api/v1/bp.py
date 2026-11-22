@@ -1,0 +1,5 @@
+from __future__ import annotations
+
+from flask import Blueprint
+
+v1_bp = Blueprint("v1", __name__, url_prefix="/api/v1")
