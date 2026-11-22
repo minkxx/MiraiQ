@@ -6,7 +6,7 @@ Personal anime recommendation engine powered by your AniList taste. Learns what 
 
 ```bash
 # From source
-git clone https://github.com/minkxx/MiraiQ
+git clone https://github.com/minkxx/MiraiQ.git
 cd MiraiQ
 pip install -e .
 ```
