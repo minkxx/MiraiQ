@@ -33,7 +33,9 @@ class SyncEngine:
 
     async def sync_user(self, username: str, force: bool = False) -> CacheMetadata:
         """
-        Full sync: fetch user profile, watch list, and candidate catalog (global).
+        Sync user profile and watch list only (does NOT fetch global catalog).
+
+        Use `fetch_catalog()` separately to fetch the global candidate catalog.
 
         Args:
             username: AniList username
@@ -43,13 +45,6 @@ class SyncEngine:
             CacheMetadata with sync statistics
         """
         console.print(f"[bold cyan]Syncing data for [yellow]{username}[/yellow]...[/bold cyan]")
-
-        # Check if global catalog exists (unless forced)
-        catalog_exists = self.cache_manager.global_catalog_exists()
-        if catalog_exists and not force:
-            console.print("  [green]Using existing global catalog[/green]")
-        else:
-            console.print("  [yellow]Fetching global catalog (first user or forced)...[/yellow]")
 
         async with AniListClient(self.rate_limiter) as client:
             # 1. Get user profile and score format
@@ -94,47 +89,46 @@ class SyncEngine:
                         pass
                 cached_entries.append(cached)
 
-            # 3. Fetch candidate catalog (popular/acclaimed anime) ONLY if not exists
-            if not catalog_exists or force:
-                console.print(
-                    f"  Fetching candidate catalog (target: {self.TARGET_CATALOG_SIZE} anime)..."
-                )
-                media_catalog = await self._fetch_candidate_catalog(client)
-                console.print(
-                    f"  Fetched [bold]{len(media_catalog)}[/bold] anime for global catalog"
-                )
-            else:
-                media_catalog = self.cache_manager.load_media_catalog(username)
-                console.print(
-                    f"  Loaded [bold]{len(media_catalog)}[/bold] anime from global catalog"
-                )
-
-            # 4. Save to cache
+            # 3. Save to cache
             with console.status("[bold green]Saving to cache..."):
                 self.cache_manager.save_user_entries(username, cached_entries)
-                if not catalog_exists or force:
-                    self.cache_manager.save_media_catalog(username, media_catalog)
+
+                # Report existing catalog count for metadata (0 if none exists)
+                existing_catalog = self.cache_manager.load_media_catalog(username)
 
                 metadata = CacheMetadata(
                     username=username,
                     user_id=user.id,
                     synced_at=datetime.now().isoformat(),
                     total_user_entries=len(cached_entries),
-                    total_cached_media=len(media_catalog),
+                    total_cached_media=len(existing_catalog),
                 )
                 self.cache_manager.save_metadata(metadata)
+
+        if not self.cache_manager.global_catalog_exists():
+            console.print(
+                "[yellow]Note: No global catalog found. Run 'miraiq fetch-catalog' "
+                "to fetch candidate anime for recommendations.[/yellow]"
+            )
 
         console.print("[bold green]Sync complete![/bold green]")
         return metadata
 
-    async def _fetch_candidate_catalog(self, client: AniListClient) -> list[CachedMedia]:
-        """Fetch popular anime for the candidate pool."""
+    async def _fetch_candidate_catalog(
+        self, client: AniListClient, limit: int = TARGET_CATALOG_SIZE
+    ) -> list[CachedMedia]:
+        """Fetch popular anime for the candidate pool.
+
+        Args:
+            client: AniList API client
+            limit: Maximum number of anime to fetch
+        """
         all_media: list[CachedMedia] = []
         seen_ids: set[int] = set()
 
         # Calculate pages needed (50 per page)
         per_page = 50
-        estimated_pages = (self.TARGET_CATALOG_SIZE // per_page) + 2
+        estimated_pages = (limit // per_page) + 2
 
         with Progress(
             SpinnerColumn(),
@@ -170,36 +164,42 @@ class SyncEngine:
                     break
 
                 # Stop if we have enough
-                if len(all_media) >= self.TARGET_CATALOG_SIZE:
+                if len(all_media) >= limit:
                     break
 
-        # Also ensure user's watched anime are in catalog (for training)
-        # This is handled by the training phase which merges user entries with catalog
+        return all_media[:limit]
 
-        return all_media[: self.TARGET_CATALOG_SIZE]
+    async def fetch_catalog(self, limit: int = TARGET_CATALOG_SIZE) -> CacheMetadata:
+        """Fetch the global candidate catalog (shared across all users).
 
-    async def sync_catalog_only(self, username: str) -> CacheMetadata:
-        """Re-fetch the global candidate catalog (affects all users)."""
-        console.print("[bold cyan]Updating global catalog...[/bold cyan]")
+        Args:
+            limit: Maximum number of anime to fetch
+
+        Returns:
+            CacheMetadata with catalog statistics
+        """
+        console.print(
+            f"[bold cyan]Fetching global candidate catalog (target: {limit} anime)...[/bold cyan]"
+        )
 
         async with AniListClient(self.rate_limiter) as client:
-            media_catalog = await self._fetch_candidate_catalog(client)
+            media_catalog = await self._fetch_candidate_catalog(client, limit=limit)
 
-            self.cache_manager.save_media_catalog(username, media_catalog)
+        self.cache_manager.save_media_catalog("__global__", media_catalog)
 
-            # Update metadata for all existing users
-            if self.cache_manager.user_dir.exists():
-                for user_dir in self.cache_manager.user_dir.iterdir():
-                    if user_dir.is_dir():
-                        user_name = user_dir.name
-                        metadata = self.cache_manager.load_metadata(user_name)
-                        if metadata:
-                            metadata.synced_at = datetime.now().isoformat()
-                            metadata.total_cached_media = len(media_catalog)
-                            self.cache_manager.save_metadata(metadata)
+        # Update metadata for all existing users
+        if self.cache_manager.user_dir.exists():
+            for user_dir in self.cache_manager.user_dir.iterdir():
+                if user_dir.is_dir():
+                    user_name = user_dir.name
+                    metadata = self.cache_manager.load_metadata(user_name)
+                    if metadata:
+                        metadata.synced_at = datetime.now().isoformat()
+                        metadata.total_cached_media = len(media_catalog)
+                        self.cache_manager.save_metadata(metadata)
 
         console.print(
-            f"[bold green]Global catalog updated: {len(media_catalog)} anime[/bold green]"
+            f"[bold green]Global catalog fetched: {len(media_catalog)} anime[/bold green]"
         )
         return CacheMetadata(
             username="__global__",
@@ -215,18 +215,19 @@ async def run_sync(
     cache_dir: str = "~/.miraiq/cache",
     force: bool = False,
 ) -> CacheMetadata:
-    """Convenience function to run full sync."""
+    """Convenience function to run user sync."""
     cache_manager = CacheManager(cache_dir)
     rate_limiter = RateLimiter()
     engine = SyncEngine(cache_manager, rate_limiter)
     return await engine.sync_user(username, force=force)
 
 
-async def run_catalog_update(cache_dir: str = "~/.miraiq/cache") -> CacheMetadata:
-    """Convenience function to update global catalog only."""
+async def run_fetch_catalog(
+    cache_dir: str = "~/.miraiq/cache",
+    limit: int = SyncEngine.TARGET_CATALOG_SIZE,
+) -> CacheMetadata:
+    """Convenience function to fetch global candidate catalog."""
     cache_manager = CacheManager(cache_dir)
     rate_limiter = RateLimiter()
     engine = SyncEngine(cache_manager, rate_limiter)
-    # Use a dummy username since sync_catalog_only still needs one for metadata update
-    # but the catalog itself is global
-    return await engine.sync_catalog_only("__global__")
+    return await engine.fetch_catalog(limit=limit)

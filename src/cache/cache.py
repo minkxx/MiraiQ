@@ -163,8 +163,8 @@ class CacheManager:
     # --- Utility ---
 
     def cache_exists(self, username: str) -> bool:
-        """Check if user cache exists (global catalog + user entries)."""
-        return self.global_catalog_exists() and self._user_entries_file(username).exists()
+        """Check if user cache exists (user entries)."""
+        return self._user_entries_file(username).exists()
 
     def model_exists(self, username: str) -> bool:
         """Check if trained model exists."""

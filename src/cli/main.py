@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from src.anilist.sync import run_catalog_update, run_sync
+from src.anilist.sync import run_fetch_catalog, run_sync
 from src.cache.cache import CacheManager
 from src.model.recommender import (
     RecommendationFilters,
@@ -43,10 +43,15 @@ def sync(
         bool, typer.Option("--force", "-f", help="Force re-sync even if cache exists")
     ] = False,
 ) -> None:
-    """Sync your AniList profile and anime catalog (fetches ~2000 popular anime)."""
+    """Sync your AniList profile and anime list (does NOT fetch global catalog).
+
+    Run 'miraiq fetch-catalog' separately to fetch candidate anime for recommendations.
+    """
     cache_manager = get_cache_manager(cache_dir)
 
-    if cache_manager.cache_exists(username) and not force:
+    # Check if user entries already exist (catalog is separate)
+    user_entries_file = cache_manager._user_entries_file(username)
+    if user_entries_file.exists() and not force:
         console.print(
             f"[yellow]Cache already exists for {username}. Use --force to re-sync.[/yellow]"
         )
@@ -73,24 +78,37 @@ def sync(
 
 
 @app.command()
-def update_catalog(
+def fetch_catalog(
     cache_dir: Annotated[
         str, typer.Option("--cache-dir", "-c", help="Cache directory")
     ] = DEFAULT_CACHE_DIR,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Number of anime to fetch")] = 2000,
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Re-fetch even if catalog exists")
+    ] = False,
 ) -> None:
-    """Update the global anime catalog (shared across all users)."""
+    """Fetch the global anime candidate catalog (shared across all users)."""
     cache_manager = get_cache_manager(cache_dir)
 
-    if not cache_manager.global_catalog_exists():
-        console.print("[red]No global catalog found. Run 'miraiq sync <username>' first.[/red]")
-        sys.exit(1)
+    if cache_manager.global_catalog_exists() and not force:
+        console.print("[yellow]Global catalog already exists. Use --force to re-fetch.[/yellow]")
+        return
 
     import asyncio
 
     try:
-        asyncio.run(run_catalog_update(cache_dir))
+        metadata = asyncio.run(run_fetch_catalog(cache_dir, limit))
+        console.print(
+            Panel(
+                f"[bold green]Catalog Fetch Complete![/bold green]\n"
+                f"Catalog: {metadata.total_cached_media} anime\n"
+                f"Synced: {metadata.synced_at}",
+                title="Catalog Results",
+                border_style="green",
+            )
+        )
     except Exception as e:
-        console.print(f"[bold red]Catalog update failed:[/bold red] {e}")
+        console.print(f"[bold red]Catalog fetch failed:[/bold red] {e}")
         sys.exit(1)
 
 
@@ -126,6 +144,10 @@ def train(
 
     if not cache_manager.cache_exists(username):
         console.print(f"[red]No cache found for {username}. Run 'miraiq sync' first.[/red]")
+        sys.exit(1)
+
+    if not cache_manager.global_catalog_exists():
+        console.print("[red]No global catalog found. Run 'miraiq fetch-catalog' first.[/red]")
         sys.exit(1)
 
     if cache_manager.model_exists(username):
@@ -276,6 +298,16 @@ def recommend(
     ] = False,
 ) -> None:
     """Get personalized anime recommendations."""
+    cache_manager = get_cache_manager(cache_dir)
+
+    if not cache_manager.cache_exists(username):
+        console.print(f"[red]No cache found for {username}. Run 'miraiq sync' first.[/red]")
+        sys.exit(1)
+
+    if not cache_manager.global_catalog_exists():
+        console.print("[red]No global catalog found. Run 'miraiq fetch-catalog' first.[/red]")
+        sys.exit(1)
+
     try:
         engine = load_engine(username, cache_dir)
     except ValueError as e:
@@ -387,6 +419,16 @@ def explain(
     ] = DEFAULT_CACHE_DIR,
 ) -> None:
     """Explain why an anime was recommended (shows feature contributions)."""
+    cache_manager = get_cache_manager(cache_dir)
+
+    if not cache_manager.cache_exists(username):
+        console.print(f"[red]No cache found for {username}. Run 'miraiq sync' first.[/red]")
+        sys.exit(1)
+
+    if not cache_manager.global_catalog_exists():
+        console.print("[red]No global catalog found. Run 'miraiq fetch-catalog' first.[/red]")
+        sys.exit(1)
+
     try:
         engine = load_engine(username, cache_dir)
     except ValueError as e:
@@ -477,6 +519,16 @@ def tags(
     list_formats: Annotated[bool, typer.Option("--formats", help="List formats")] = False,
 ) -> None:
     """List available genres, tags, studios, or formats from the catalog."""
+    cache_manager = get_cache_manager(cache_dir)
+
+    if not cache_manager.cache_exists(username):
+        console.print(f"[red]No cache found for {username}. Run 'miraiq sync' first.[/red]")
+        sys.exit(1)
+
+    if not cache_manager.global_catalog_exists():
+        console.print("[red]No global catalog found. Run 'miraiq fetch-catalog' first.[/red]")
+        sys.exit(1)
+
     try:
         engine = load_engine(username, cache_dir)
     except ValueError as e:
