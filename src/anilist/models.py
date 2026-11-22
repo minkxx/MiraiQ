@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -151,7 +150,7 @@ class MediaStudioEdge(BaseModel):
 class MediaRelation(BaseModel):
     id: int
     relationType: MediaRelationType
-    node: Optional["Media"] = None
+    node: Media | None = None
 
 
 class MediaExternalLink(BaseModel):
@@ -351,24 +350,25 @@ class Page(BaseModel):
 
 # GraphQL Response wrappers
 class UserResponse(BaseModel):
-    User: Optional["User"] = None
+    User: User | None = None
 
 
 class MediaListResponse(BaseModel):
-    MediaListCollection: Optional["MediaListCollection"] = None
+    MediaListCollection: MediaListCollection | None = None
 
 
 class PageResponse(BaseModel):
-    Page: Optional["Page"] = None
+    Page: Page | None = None
 
 
 class MediaResponse(BaseModel):
-    Media: Optional["Media"] = None
+    Media: Media | None = None
 
 
 # Simplified models for caching
 class CachedMedia(BaseModel):
     """Lightweight media for caching."""
+
     id: int
     title_romaji: str
     title_english: str | None = None
@@ -445,6 +445,7 @@ class CacheMetadata(BaseModel):
 # Feature extraction models
 class AnimeFeatures(BaseModel):
     """Extracted features for ML model."""
+
     media_id: int
     genres: list[str] = Field(default_factory=list)
     tag_ranks: dict[str, int] = Field(default_factory=dict)
@@ -510,6 +511,7 @@ class AnimeFeatures(BaseModel):
 
 class TasteDriver(BaseModel):
     """A learned taste driver (feature weight)."""
+
     feature: str
     weight: float
     feature_type: str  # genre, tag, studio, format, metadata
@@ -523,6 +525,7 @@ class TasteDriver(BaseModel):
 
 class RecommendationResult(BaseModel):
     """A recommended anime with prediction details."""
+
     media: CachedMedia
     predicted_score: float
     community_score: float | None
@@ -530,7 +533,9 @@ class RecommendationResult(BaseModel):
     is_planning: bool = False
     is_sequel_without_prequel: bool = False
     prequel_title: str | None = None
-    similar_to: list[dict] = Field(default_factory=list)  # [{watched_title, watched_score, shared_genres, shared_tags, shared_studios, similarity}]
+    similar_to: list[dict] = Field(
+        default_factory=list,
+    )  # watched_title, watched_score, shared_genres, shared_tags, shared_studios, similarity
 
     @property
     def display_title(self) -> str:

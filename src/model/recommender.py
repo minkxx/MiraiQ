@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
-
-import joblib
-import numpy as np
+from datetime import datetime
 
 from src.anilist.models import (
     CachedMedia,
     CachedUserEntry,
     RecommendationResult,
-    TasteDriver,
 )
 from src.cache.cache import CacheManager
 from src.model.trainer import FeatureExtractor, TasteModel
-
 
 # Known Chinese/Korean studio name patterns (for filtering)
 CHINESE_KOREAN_STUDIO_PATTERNS = [
@@ -44,11 +39,10 @@ CHINESE_KOREAN_STUDIO_PATTERNS = [
 ]
 
 
-from datetime import datetime
-
 @dataclass
 class RecommendationFilters:
     """Filters for recommendation query."""
+
     include_genres: list[str] | None = None
     exclude_genres: list[str] | None = None
     include_tags: list[str] | None = None
@@ -119,27 +113,27 @@ class RecommendationEngine:
                 return False
 
         # Chinese/Korean filter
-        if filters.exclude_chinese_korean:
-            if self._is_chinese_korean(media):
-                return False
+        if filters.exclude_chinese_korean and self._is_chinese_korean(media):
+            return False
 
         # Genre filters (ALL specified genres must match)
-        if filters.include_genres:
-            if not all(g in media.genres for g in filters.include_genres):
-                return False
-        if filters.exclude_genres:
-            if any(g in media.genres for g in filters.exclude_genres):
-                return False
+        if filters.include_genres and not all(g in media.genres for g in filters.include_genres):
+            return False
+        if filters.exclude_genres and any(g in media.genres for g in filters.exclude_genres):
+            return False
 
         # Tag filters (check tag rank threshold)
-        if filters.include_tags:
-            tag_ranks = media.tag_ranks
-            if not any(tag in tag_ranks and tag_ranks[tag] >= filters.min_tag_rank for tag in filters.include_tags):
-                return False
-        if filters.exclude_tags:
-            tag_ranks = media.tag_ranks
-            if any(tag in tag_ranks and tag_ranks[tag] >= filters.min_tag_rank for tag in filters.exclude_tags):
-                return False
+        tag_ranks = media.tag_ranks
+        if filters.include_tags and not any(
+            tag in tag_ranks and tag_ranks[tag] >= filters.min_tag_rank
+            for tag in filters.include_tags
+        ):
+            return False
+        if filters.exclude_tags and any(
+            tag in tag_ranks and tag_ranks[tag] >= filters.min_tag_rank
+            for tag in filters.exclude_tags
+        ):
+            return False
 
         # Format filter
         if filters.formats and media.format not in filters.formats:
@@ -152,15 +146,11 @@ class RecommendationEngine:
             return False
 
         # Sequel filter
-        if filters.hide_sequels_without_prequel:
-            if self._is_sequel_without_prequel(media):
-                return False
-
-        # Planning filter
-        if not filters.include_planning and media.id in self._planning_ids:
+        if filters.hide_sequels_without_prequel and self._is_sequel_without_prequel(media):
             return False
 
-        return True
+        # Planning filter
+        return not (not filters.include_planning and media.id in self._planning_ids)
 
     def _is_chinese_korean(self, media: CachedMedia) -> bool:
         """Check if anime is likely Chinese or Korean based on studio names."""
@@ -174,11 +164,9 @@ class RecommendationEngine:
     def _is_sequel_without_prequel(self, media: CachedMedia) -> bool:
         """Check if anime is a sequel whose prequel isn't in completed list."""
         for relation in media.relations:
-            if relation.relation_type == "PREQUEL":
-                # Related media is a prequel of this media
-                # If the prequel hasn't been completed, block this media
-                if relation.id not in self._completed_ids:
-                    return True
+            # Block sequels whose prequel hasn't been completed
+            if relation.relation_type == "PREQUEL" and relation.id not in self._completed_ids:
+                return True
         return False
 
     def _get_sequel_prequel_title(self, media: CachedMedia) -> str | None:
@@ -228,15 +216,17 @@ class RecommendationEngine:
         for entry, watched_media in rated_watched:
             sim = self._compute_similarity(media, watched_media)
             if sim["similarity"] > 0:
-                similarities.append({
-                    "watched_media_id": watched_media.id,
-                    "watched_title": watched_media.display_title,
-                    "watched_score": entry.score,
-                    "shared_genres": sim["shared_genres"],
-                    "shared_tags": sim["shared_tags"],
-                    "shared_studios": sim["shared_studios"],
-                    "similarity": sim["similarity"],
-                })
+                similarities.append(
+                    {
+                        "watched_media_id": watched_media.id,
+                        "watched_title": watched_media.display_title,
+                        "watched_score": entry.score,
+                        "shared_genres": sim["shared_genres"],
+                        "shared_tags": sim["shared_tags"],
+                        "shared_studios": sim["shared_studios"],
+                        "similarity": sim["similarity"],
+                    }
+                )
 
         # Sort by similarity * watched_score (favor similar AND highly rated)
         similarities.sort(key=lambda x: x["similarity"] * (x["watched_score"] or 5), reverse=True)
@@ -267,7 +257,7 @@ class RecommendationEngine:
         # Build watched anime lookup for similarity boost
         # Boost score for anime similar to highly-rated watched anime
         boosted_scores = []
-        for media, pred_score in zip(candidates, predicted_scores):
+        for media, pred_score in zip(candidates, predicted_scores, strict=False):
             boost = 0.0
             similar_watched = self._get_similar_watched(media, top_k=5)
             for sim in similar_watched:
@@ -279,7 +269,9 @@ class RecommendationEngine:
 
         # Build results
         results = []
-        for media, pred_score, boosted_score in zip(candidates, predicted_scores, boosted_scores):
+        for media, _, boosted_score in zip(
+            candidates, predicted_scores, boosted_scores, strict=False
+        ):
             community_score = media.community_score
             score_diff = boosted_score - community_score if community_score else 0.0
 
@@ -290,16 +282,18 @@ class RecommendationEngine:
             # Get similar watched anime for explanation
             similar_to = self._get_similar_watched(media, top_k=3)
 
-            results.append(RecommendationResult(
-                media=media,
-                predicted_score=round(boosted_score, 2),
-                community_score=round(community_score, 2) if community_score else None,
-                score_difference=round(score_diff, 2),
-                is_planning=is_planning,
-                is_sequel_without_prequel=is_sequel,
-                prequel_title=prequel_title,
-                similar_to=similar_to,
-            ))
+            results.append(
+                RecommendationResult(
+                    media=media,
+                    predicted_score=round(boosted_score, 2),
+                    community_score=round(community_score, 2) if community_score else None,
+                    score_difference=round(score_diff, 2),
+                    is_planning=is_planning,
+                    is_sequel_without_prequel=is_sequel,
+                    prequel_title=prequel_title,
+                    similar_to=similar_to,
+                )
+            )
 
         if filters.sort_by == "predicted":
             results.sort(key=lambda r: r.predicted_score, reverse=True)
@@ -308,7 +302,7 @@ class RecommendationEngine:
         elif filters.sort_by == "difference":
             results.sort(key=lambda r: r.score_difference, reverse=True)
 
-        return results[:filters.limit]
+        return results[: filters.limit]
 
     def get_available_genres(self) -> list[str]:
         """Get all unique genres in catalog."""

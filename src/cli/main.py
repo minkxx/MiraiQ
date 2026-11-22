@@ -3,24 +3,20 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
-from rich.text import Text
-from rich.columns import Columns
+from rich.table import Table
 
-from src.anilist.sync import run_sync, run_catalog_update
+from src.anilist.sync import run_catalog_update, run_sync
 from src.cache.cache import CacheManager
-from src.model.trainer import train_model
 from src.model.recommender import (
-    RecommendationEngine,
     RecommendationFilters,
     load_engine,
 )
+from src.model.trainer import train_model
 
 app = typer.Typer(
     name="miraiq",
@@ -40,28 +36,37 @@ def get_cache_manager(cache_dir: str = DEFAULT_CACHE_DIR) -> CacheManager:
 @app.command()
 def sync(
     username: Annotated[str, typer.Argument(help="AniList username")],
-    cache_dir: Annotated[str, typer.Option("--cache-dir", "-c", help="Cache directory")] = DEFAULT_CACHE_DIR,
-    force: Annotated[bool, typer.Option("--force", "-f", help="Force re-sync even if cache exists")] = False,
+    cache_dir: Annotated[
+        str, typer.Option("--cache-dir", "-c", help="Cache directory")
+    ] = DEFAULT_CACHE_DIR,
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Force re-sync even if cache exists")
+    ] = False,
 ) -> None:
     """Sync your AniList profile and anime catalog (fetches ~2000 popular anime)."""
     cache_manager = get_cache_manager(cache_dir)
 
     if cache_manager.cache_exists(username) and not force:
-        console.print(f"[yellow]Cache already exists for {username}. Use --force to re-sync.[/yellow]")
+        console.print(
+            f"[yellow]Cache already exists for {username}. Use --force to re-sync.[/yellow]"
+        )
         return
 
     import asyncio
+
     try:
         metadata = asyncio.run(run_sync(username, cache_dir, force))
-        console.print(Panel(
-            f"[bold green]Sync Complete![/bold green]\n"
-            f"User: {metadata.username} (ID: {metadata.user_id})\n"
-            f"Entries: {metadata.total_user_entries}\n"
-            f"Catalog: {metadata.total_cached_media} anime\n"
-            f"Synced: {metadata.synced_at}",
-            title="Sync Results",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[bold green]Sync Complete![/bold green]\n"
+                f"User: {metadata.username} (ID: {metadata.user_id})\n"
+                f"Entries: {metadata.total_user_entries}\n"
+                f"Catalog: {metadata.total_cached_media} anime\n"
+                f"Synced: {metadata.synced_at}",
+                title="Sync Results",
+                border_style="green",
+            )
+        )
     except Exception as e:
         console.print(f"[bold red]Sync failed:[/bold red] {e}")
         sys.exit(1)
@@ -69,16 +74,19 @@ def sync(
 
 @app.command()
 def update_catalog(
-    cache_dir: Annotated[str, typer.Option("--cache-dir", "-c", help="Cache directory")] = DEFAULT_CACHE_DIR,
+    cache_dir: Annotated[
+        str, typer.Option("--cache-dir", "-c", help="Cache directory")
+    ] = DEFAULT_CACHE_DIR,
 ) -> None:
     """Update the global anime catalog (shared across all users)."""
     cache_manager = get_cache_manager(cache_dir)
 
     if not cache_manager.global_catalog_exists():
-        console.print(f"[red]No global catalog found. Run 'miraiq sync <username>' first.[/red]")
+        console.print("[red]No global catalog found. Run 'miraiq sync <username>' first.[/red]")
         sys.exit(1)
 
     import asyncio
+
     try:
         asyncio.run(run_catalog_update(cache_dir))
     except Exception as e:
@@ -89,13 +97,29 @@ def update_catalog(
 @app.command()
 def train(
     username: Annotated[str, typer.Argument(help="AniList username")],
-    cache_dir: Annotated[str, typer.Option("--cache-dir", "-c", help="Cache directory")] = DEFAULT_CACHE_DIR,
-    min_ratings: Annotated[int, typer.Option("--min-ratings", "-m", help="Minimum rated anime required")] = 5,
-    tag_threshold: Annotated[int, typer.Option("--tag-threshold", help="Minimum tag rank % to include as feature")] = 50,
-    min_studio_count: Annotated[int, typer.Option("--min-studio-count", help="Minimum anime count for studio feature")] = 3,
-    include_format: Annotated[bool, typer.Option("--include-format", help="Include format (TV/MOVIE/OVA) as features")] = False,
-    include_source: Annotated[bool, typer.Option("--include-source", help="Include source (manga/LN/original) as features")] = False,
-    include_metadata: Annotated[bool, typer.Option("--include-metadata", help="Include year/episodes/popularity as features")] = True,
+    cache_dir: Annotated[
+        str, typer.Option("--cache-dir", "-c", help="Cache directory")
+    ] = DEFAULT_CACHE_DIR,
+    min_ratings: Annotated[
+        int, typer.Option("--min-ratings", "-m", help="Minimum rated anime required")
+    ] = 5,
+    tag_threshold: Annotated[
+        int, typer.Option("--tag-threshold", help="Minimum tag rank % to include as feature")
+    ] = 50,
+    min_studio_count: Annotated[
+        int, typer.Option("--min-studio-count", help="Minimum anime count for studio feature")
+    ] = 3,
+    include_format: Annotated[
+        bool, typer.Option("--include-format", help="Include format (TV/MOVIE/OVA) as features")
+    ] = False,
+    include_source: Annotated[
+        bool,
+        typer.Option("--include-source", help="Include source (manga/LN/original) as features"),
+    ] = False,
+    include_metadata: Annotated[
+        bool,
+        typer.Option("--include-metadata", help="Include year/episodes/popularity as features"),
+    ] = True,
 ) -> None:
     """Train your personal taste model from cached data."""
     cache_manager = get_cache_manager(cache_dir)
@@ -105,26 +129,33 @@ def train(
         sys.exit(1)
 
     if cache_manager.model_exists(username):
-        console.print(f"[yellow]Model already exists. Re-training...[/yellow]")
+        console.print("[yellow]Model already exists. Re-training...[/yellow]")
 
     try:
         with console.status("[bold green]Training taste model..."):
             model, metrics = train_model(
-                username, cache_manager, min_ratings=min_ratings,
-                tag_threshold=tag_threshold, min_studio_count=min_studio_count,
-                include_format=include_format, include_source=include_source,
-                include_metadata=include_metadata
+                username,
+                cache_manager,
+                min_ratings=min_ratings,
+                tag_threshold=tag_threshold,
+                min_studio_count=min_studio_count,
+                include_format=include_format,
+                include_source=include_source,
+                include_metadata=include_metadata,
             )
 
-        console.print(Panel(
-            f"[bold green]Training Complete![/bold green]\n"
-            f"Training samples: {metrics['n_samples']} (rated: {metrics['n_rated']}, dropped: {metrics['n_dropped']})\n"
-            f"Features: {metrics['n_features']}\n"
-            f"Train RMSE: {metrics['train_rmse']:.3f}\n"
-            f"CV RMSE: {metrics['cv_rmse']:.3f}",
-            title="Model Training Results",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[bold green]Training Complete![/bold green]\n"
+                f"Training samples: {metrics['n_samples']} (rated: {metrics['n_rated']}, "
+                f"dropped: {metrics['n_dropped']})\n"
+                f"Features: {metrics['n_features']}\n"
+                f"Train RMSE: {metrics['train_rmse']:.3f}\n"
+                f"CV RMSE: {metrics['cv_rmse']:.3f}",
+                title="Model Training Results",
+                border_style="green",
+            )
+        )
     except ValueError as e:
         console.print(f"[bold red]Training failed:[/bold red] {e}")
         sys.exit(1)
@@ -136,7 +167,9 @@ def train(
 @app.command()
 def taste(
     username: Annotated[str, typer.Argument(help="AniList username")],
-    cache_dir: Annotated[str, typer.Option("--cache-dir", "-c", help="Cache directory")] = DEFAULT_CACHE_DIR,
+    cache_dir: Annotated[
+        str, typer.Option("--cache-dir", "-c", help="Cache directory")
+    ] = DEFAULT_CACHE_DIR,
     top: Annotated[int, typer.Option("--top", "-t", help="Number of top drivers to show")] = 15,
 ) -> None:
     """Display your learned taste drivers (what you like/dislike)."""
@@ -158,7 +191,11 @@ def taste(
     console.print(f"\n[bold cyan]Your Taste Profile for [yellow]{username}[/yellow][/bold cyan]\n")
 
     if positive:
-        table = Table(title="Positive Drivers (Things You Like)", show_header=True, header_style="bold green")
+        table = Table(
+            title="Positive Drivers (Things You Like)",
+            show_header=True,
+            header_style="bold green",
+        )
         table.add_column("Feature", style="cyan", width=40)
         table.add_column("Type", style="dim", width=12)
         table.add_column("Weight", justify="right", style="green")
@@ -168,7 +205,11 @@ def taste(
         console.print()
 
     if negative:
-        table = Table(title="Negative Drivers (Things You Dislike)", show_header=True, header_style="bold red")
+        table = Table(
+            title="Negative Drivers (Things You Dislike)",
+            show_header=True,
+            header_style="bold red",
+        )
         table.add_column("Feature", style="cyan", width=40)
         table.add_column("Type", style="dim", width=12)
         table.add_column("Weight", justify="right", style="red")
@@ -181,21 +222,58 @@ def taste(
 @app.command()
 def recommend(
     username: Annotated[str, typer.Argument(help="AniList username")],
-    cache_dir: Annotated[str, typer.Option("--cache-dir", "-c", help="Cache directory")] = DEFAULT_CACHE_DIR,
+    cache_dir: Annotated[
+        str, typer.Option("--cache-dir", "-c", help="Cache directory")
+    ] = DEFAULT_CACHE_DIR,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Number of recommendations")] = 20,
-    sort_by: Annotated[str, typer.Option("--sort", "-s", help="Sort: predicted, community, difference")] = "predicted",
-    include_genres: Annotated[list[str] | None, typer.Option("--include-genre", "-g", help="Include genres (can repeat)")] = None,
-    exclude_genres: Annotated[list[str] | None, typer.Option("--exclude-genre", "-G", help="Exclude genres (can repeat)")] = None,
-    include_tags: Annotated[list[str] | None, typer.Option("--include-tag", "-t", help="Include tags (can repeat)")] = None,
-    exclude_tags: Annotated[list[str] | None, typer.Option("--exclude-tag", "-T", help="Exclude tags (can repeat)")] = None,
-    min_tag_rank: Annotated[int, typer.Option("--min-tag-rank", help="Minimum tag relevance %")] = 50,
-    formats: Annotated[list[str] | None, typer.Option("--format", "-f", help="Formats: TV, MOVIE, OVA, ONA")] = None,
+    sort_by: Annotated[
+        str, typer.Option("--sort", "-s", help="Sort: predicted, community, difference")
+    ] = "predicted",
+    include_genres: Annotated[
+        list[str] | None,
+        typer.Option("--include-genre", "-g", help="Include genres (can repeat)"),
+    ] = None,
+    exclude_genres: Annotated[
+        list[str] | None,
+        typer.Option("--exclude-genre", "-G", help="Exclude genres (can repeat)"),
+    ] = None,
+    include_tags: Annotated[
+        list[str] | None,
+        typer.Option("--include-tag", "-t", help="Include tags (can repeat)"),
+    ] = None,
+    exclude_tags: Annotated[
+        list[str] | None,
+        typer.Option("--exclude-tag", "-T", help="Exclude tags (can repeat)"),
+    ] = None,
+    min_tag_rank: Annotated[
+        int, typer.Option("--min-tag-rank", help="Minimum tag relevance %")
+    ] = 50,
+    formats: Annotated[
+        list[str] | None,
+        typer.Option("--format", "-f", help="Formats: TV, MOVIE, OVA, ONA"),
+    ] = None,
     year_min: Annotated[int | None, typer.Option("--year-min", help="Minimum release year")] = None,
     year_max: Annotated[int | None, typer.Option("--year-max", help="Maximum release year")] = None,
-    show_sequels: Annotated[bool, typer.Option("--show-sequels", help="Show sequels without prequel watched")] = False,
-    include_planning: Annotated[bool, typer.Option("--include-planning/--no-planning", help="Include Planning list anime in recommendations (default: on)")] = True,
-    unreleased: Annotated[bool, typer.Option("--unreleased", help="Include not-yet-released anime")] = False,
-    include_chinese_korean: Annotated[bool, typer.Option("--include-chinese-korean", help="Include Chinese/Korean anime (excluded by default)")] = False,
+    show_sequels: Annotated[
+        bool, typer.Option("--show-sequels", help="Show sequels without prequel watched")
+    ] = False,
+    include_planning: Annotated[
+        bool,
+        typer.Option(
+            "--include-planning/--no-planning",
+            help="Include Planning list anime in recommendations (default: on)",
+        ),
+    ] = True,
+    unreleased: Annotated[
+        bool, typer.Option("--unreleased", help="Include not-yet-released anime")
+    ] = False,
+    include_chinese_korean: Annotated[
+        bool,
+        typer.Option(
+            "--include-chinese-korean",
+            help="Include Chinese/Korean anime (excluded by default)",
+        ),
+    ] = False,
 ) -> None:
     """Get personalized anime recommendations."""
     try:
@@ -234,7 +312,10 @@ def recommend(
         "difference": "Personal vs Community",
     }
 
-    console.print(f"\n[bold cyan]Top {len(results)} Recommendations for [yellow]{username}[/yellow][/bold cyan]")
+    console.print(
+        f"\n[bold cyan]Top {len(results)} Recommendations for "
+        f"[yellow]{username}[/yellow][/bold cyan]"
+    )
     console.print(f"[dim]Sorted by: {sort_labels.get(sort_by, sort_by)}[/dim]\n")
 
     table = Table(show_header=True, header_style="bold magenta", expand=True)
@@ -264,7 +345,7 @@ def recommend(
         if rec.is_planning:
             title += " [yellow]*[/yellow]"
         if rec.is_sequel_without_prequel:
-            title += f" [red]->[/red]"
+            title += " [red]->[/red]"
 
         similar_parts = []
         for sim in rec.similar_to[:2]:
@@ -292,14 +373,18 @@ def recommend(
 
     console.print(table)
 
-    console.print("[dim]Legend: * = in your Planning list | -> = sequel (prequel not completed)[/dim]")
+    console.print(
+        "[dim]Legend: * = in your Planning list | -> = sequel (prequel not completed)[/dim]"
+    )
 
 
 @app.command()
 def explain(
     username: Annotated[str, typer.Argument(help="AniList username")],
     anime_id: Annotated[int, typer.Argument(help="AniList anime ID")],
-    cache_dir: Annotated[str, typer.Option("--cache-dir", "-c", help="Cache directory")] = DEFAULT_CACHE_DIR,
+    cache_dir: Annotated[
+        str, typer.Option("--cache-dir", "-c", help="Cache directory")
+    ] = DEFAULT_CACHE_DIR,
 ) -> None:
     """Explain why an anime was recommended (shows feature contributions)."""
     try:
@@ -333,7 +418,10 @@ def explain(
     if boost > 0:
         score_display += f" (+{boost:.1f} boost)"
 
-    console.print(f"\n[bold cyan]Why [yellow]{media.display_title}[/yellow] scored {score_display}/10[/bold cyan]\n")
+    console.print(
+        f"\n[bold cyan]Why [yellow]{media.display_title}[/yellow] scored "
+        f"{score_display}/10[/bold cyan]\n"
+    )
 
     if not contributions:
         console.print("[dim]No significant feature contributions.[/dim]")
@@ -352,7 +440,9 @@ def explain(
     if similar_watched:
         console.print("\n[bold cyan]Based on what you've watched:[/bold cyan]\n")
         for sim in similar_watched:
-            score_str = f"rated {sim['watched_score']:.1f}/10" if sim["watched_score"] else "not rated"
+            score_str = (
+                f"rated {sim['watched_score']:.1f}/10" if sim["watched_score"] else "not rated"
+            )
             parts = []
             if sim["shared_genres"]:
                 parts.append(f"genres: {', '.join(sim['shared_genres'])}")
@@ -362,7 +452,8 @@ def explain(
                 parts.append(f"studio: {', '.join(sim['shared_studios'])}")
             detail = "; ".join(parts) if parts else "no shared features"
             console.print(
-                f"• [dim]{sim['watched_title']}[/dim] ({score_str}, similarity {sim['similarity']:.2f}) - {detail}"
+                f"• [dim]{sim['watched_title']}[/dim] "
+                f"({score_str}, similarity {sim['similarity']:.2f}) - {detail}"
             )
     else:
         console.print("\n[dim]No similar watched anime found.[/dim]")
@@ -371,10 +462,17 @@ def explain(
 @app.command()
 def tags(
     username: Annotated[str, typer.Argument(help="AniList username")],
-    cache_dir: Annotated[str, typer.Option("--cache-dir", "-c", help="Cache directory")] = DEFAULT_CACHE_DIR,
-    search: Annotated[str | None, typer.Option("--search", "-s", help="Search tags by name")] = None,
+    cache_dir: Annotated[
+        str, typer.Option("--cache-dir", "-c", help="Cache directory")
+    ] = DEFAULT_CACHE_DIR,
+    search: Annotated[
+        str | None,
+        typer.Option("--search", "-s", help="Search tags by name"),
+    ] = None,
     min_rank: Annotated[int, typer.Option("--min-rank", help="Minimum tag relevance %")] = 50,
-    list_genres: Annotated[bool, typer.Option("--genres", help="List genres instead of tags")] = False,
+    list_genres: Annotated[
+        bool, typer.Option("--genres", help="List genres instead of tags")
+    ] = False,
     list_studios: Annotated[bool, typer.Option("--studios", help="List studios")] = False,
     list_formats: Annotated[bool, typer.Option("--formats", help="List formats")] = False,
 ) -> None:
@@ -431,7 +529,9 @@ def tags(
 @app.command()
 def info(
     username: Annotated[str, typer.Argument(help="AniList username")],
-    cache_dir: Annotated[str, typer.Option("--cache-dir", "-c", help="Cache directory")] = DEFAULT_CACHE_DIR,
+    cache_dir: Annotated[
+        str, typer.Option("--cache-dir", "-c", help="Cache directory")
+    ] = DEFAULT_CACHE_DIR,
 ) -> None:
     """Show cache and model information."""
     cache_manager = get_cache_manager(cache_dir)
@@ -470,7 +570,9 @@ def info(
 @app.command()
 def clear(
     username: Annotated[str, typer.Argument(help="AniList username")],
-    cache_dir: Annotated[str, typer.Option("--cache-dir", "-c", help="Cache directory")] = DEFAULT_CACHE_DIR,
+    cache_dir: Annotated[
+        str, typer.Option("--cache-dir", "-c", help="Cache directory")
+    ] = DEFAULT_CACHE_DIR,
     confirm: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
 ) -> None:
     """Clear all cached data for a user."""

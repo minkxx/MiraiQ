@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import json
-import os
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import orjson
 
 from src.anilist.models import (
-    AnimeFeatures,
-    CacheMetadata,
     CachedMedia,
     CachedUserEntry,
+    CacheMetadata,
     TasteDriver,
 )
 
@@ -122,15 +118,19 @@ class CacheManager:
     def save_model(self, username: str, model: Any, feature_names: list[str]) -> None:
         """Save trained model and feature names."""
         import joblib
+
         model_file = self._model_file(username)
         features_file = self._features_file(username)
 
         joblib.dump(model, model_file)
-        features_file.write_bytes(orjson.dumps({"feature_names": feature_names}, option=orjson.OPT_INDENT_2))
+        features_file.write_bytes(
+            orjson.dumps({"feature_names": feature_names}, option=orjson.OPT_INDENT_2)
+        )
 
     def load_model(self, username: str) -> tuple[Any, list[str]] | None:
         """Load trained model and feature names."""
         import joblib
+
         model_file = self._model_file(username)
         features_file = self._features_file(username)
 
@@ -164,10 +164,7 @@ class CacheManager:
 
     def cache_exists(self, username: str) -> bool:
         """Check if user cache exists (global catalog + user entries)."""
-        return (
-            self.global_catalog_exists()
-            and self._user_entries_file(username).exists()
-        )
+        return self.global_catalog_exists() and self._user_entries_file(username).exists()
 
     def model_exists(self, username: str) -> bool:
         """Check if trained model exists."""
@@ -176,6 +173,7 @@ class CacheManager:
     def clear_user_cache(self, username: str, clear_global: bool = False) -> None:
         """Clear all cache for a user."""
         import shutil
+
         user_dir = self._user_cache_dir(username)
         if user_dir.exists():
             shutil.rmtree(user_dir)

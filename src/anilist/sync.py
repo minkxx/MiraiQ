@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
-from typing import Any
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
-from src.anilist.client import AniListClient, RateLimiter, media_to_cached, entry_to_cached
-from src.anilist.models import CacheMetadata, CachedMedia, CachedUserEntry, MediaFormat
+from src.anilist.client import AniListClient, RateLimiter, entry_to_cached, media_to_cached
+from src.anilist.models import CachedMedia, CacheMetadata
 from src.cache.cache import CacheManager
-
 
 console = Console()
 
@@ -50,9 +47,9 @@ class SyncEngine:
         # Check if global catalog exists (unless forced)
         catalog_exists = self.cache_manager.global_catalog_exists()
         if catalog_exists and not force:
-            console.print(f"  [green]Using existing global catalog[/green]")
+            console.print("  [green]Using existing global catalog[/green]")
         else:
-            console.print(f"  [yellow]Fetching global catalog (first user or forced)...[/yellow]")
+            console.print("  [yellow]Fetching global catalog (first user or forced)...[/yellow]")
 
         async with AniListClient(self.rate_limiter) as client:
             # 1. Get user profile and score format
@@ -99,12 +96,18 @@ class SyncEngine:
 
             # 3. Fetch candidate catalog (popular/acclaimed anime) ONLY if not exists
             if not catalog_exists or force:
-                console.print(f"  Fetching candidate catalog (target: {self.TARGET_CATALOG_SIZE} anime)...")
+                console.print(
+                    f"  Fetching candidate catalog (target: {self.TARGET_CATALOG_SIZE} anime)..."
+                )
                 media_catalog = await self._fetch_candidate_catalog(client)
-                console.print(f"  Fetched [bold]{len(media_catalog)}[/bold] anime for global catalog")
+                console.print(
+                    f"  Fetched [bold]{len(media_catalog)}[/bold] anime for global catalog"
+                )
             else:
                 media_catalog = self.cache_manager.load_media_catalog(username)
-                console.print(f"  Loaded [bold]{len(media_catalog)}[/bold] anime from global catalog")
+                console.print(
+                    f"  Loaded [bold]{len(media_catalog)}[/bold] anime from global catalog"
+                )
 
             # 4. Save to cache
             with console.status("[bold green]Saving to cache..."):
@@ -121,7 +124,7 @@ class SyncEngine:
                 )
                 self.cache_manager.save_metadata(metadata)
 
-        console.print(f"[bold green]Sync complete![/bold green]")
+        console.print("[bold green]Sync complete![/bold green]")
         return metadata
 
     async def _fetch_candidate_catalog(self, client: AniListClient) -> list[CachedMedia]:
@@ -173,11 +176,11 @@ class SyncEngine:
         # Also ensure user's watched anime are in catalog (for training)
         # This is handled by the training phase which merges user entries with catalog
 
-        return all_media[:self.TARGET_CATALOG_SIZE]
+        return all_media[: self.TARGET_CATALOG_SIZE]
 
     async def sync_catalog_only(self, username: str) -> CacheMetadata:
         """Re-fetch the global candidate catalog (affects all users)."""
-        console.print(f"[bold cyan]Updating global catalog...[/bold cyan]")
+        console.print("[bold cyan]Updating global catalog...[/bold cyan]")
 
         async with AniListClient(self.rate_limiter) as client:
             media_catalog = await self._fetch_candidate_catalog(client)
@@ -195,7 +198,9 @@ class SyncEngine:
                             metadata.total_cached_media = len(media_catalog)
                             self.cache_manager.save_metadata(metadata)
 
-        console.print(f"[bold green]Global catalog updated: {len(media_catalog)} anime[/bold green]")
+        console.print(
+            f"[bold green]Global catalog updated: {len(media_catalog)} anime[/bold green]"
+        )
         return CacheMetadata(
             username="__global__",
             user_id=0,
@@ -205,7 +210,11 @@ class SyncEngine:
         )
 
 
-async def run_sync(username: str, cache_dir: str = "~/.miraiq/cache", force: bool = False) -> CacheMetadata:
+async def run_sync(
+    username: str,
+    cache_dir: str = "~/.miraiq/cache",
+    force: bool = False,
+) -> CacheMetadata:
     """Convenience function to run full sync."""
     cache_manager = CacheManager(cache_dir)
     rate_limiter = RateLimiter()

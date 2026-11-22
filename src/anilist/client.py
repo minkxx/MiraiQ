@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
 
 import httpx
 import orjson
@@ -15,21 +14,21 @@ from src.anilist.models import (
     CachedRelation,
     CachedUserEntry,
     Media,
-    MediaFormat,
     MediaListCollection,
-    MediaListStatus,
+    MediaListEntry,
     Page,
+    PageInfo,
     User,
-    UserResponse,
 )
 
 
 @dataclass
 class RateLimiter:
     """Token bucket rate limiter for AniList API (30 req/min = 1 req/2s)."""
+
     max_requests: int = 30
     time_window: float = 60.0
-    _requests: list[float] = None
+    _requests: list[float] = field(default_factory=list)
 
     def __post_init__(self):
         self._requests = []
@@ -104,7 +103,8 @@ class AniListClient:
                         duration
                         source
                         genres
-                        tags { id name description category rank isGeneralSpoiler isMediaSpoiler isAdult }
+                        tags { id name description category rank
+                               isGeneralSpoiler isMediaSpoiler isAdult }
                         studios { edges { id isMain node { id name isAnimationStudio siteUrl } } }
                         averageScore
                         meanScore
@@ -125,7 +125,13 @@ class AniListClient:
     """
 
     POPULAR_ANIME_QUERY = """
-    query ($page: Int, $perPage: Int, $type: MediaType, $sort: [MediaSort], $genre_not_in: [String]) {
+    query (
+        $page: Int,
+        $perPage: Int,
+        $type: MediaType,
+        $sort: [MediaSort],
+        $genre_not_in: [String]
+    ) {
         Page(page: $page, perPage: $perPage) {
             pageInfo { total perPage currentPage lastPage hasNextPage }
             media(type: $type, sort: $sort, genre_not_in: $genre_not_in) {
@@ -141,7 +147,8 @@ class AniListClient:
                 duration
                 source
                 genres
-                tags { id name description category rank isGeneralSpoiler isMediaSpoiler isAdult }
+                tags { id name description category rank
+                       isGeneralSpoiler isMediaSpoiler isAdult }
                 studios { edges { id isMain node { id name isAnimationStudio siteUrl } } }
                 averageScore
                 meanScore
@@ -227,7 +234,16 @@ class AniListClient:
         data = await self._execute(self.POPULAR_ANIME_QUERY, variables)
         if data.get("Page"):
             return Page(**data["Page"])
-        return Page(pageInfo=PageInfo(total=0, perPage=per_page, currentPage=page, lastPage=0, hasNextPage=False), media=[])
+        return Page(
+            pageInfo=PageInfo(
+                total=0,
+                perPage=per_page,
+                currentPage=page,
+                lastPage=0,
+                hasNextPage=False,
+            ),
+            media=[],
+        )
 
 
 class AniListError(Exception):
@@ -241,12 +257,14 @@ def media_to_cached(media: Media) -> CachedMedia:
     relations = []
     if media.relations:
         for edge in media.relations.edges:
-            relations.append(CachedRelation(
-                id=edge.node.id,
-                relation_type=edge.relationType.value,
-                title_romaji=edge.node.title.romaji,
-                title_english=edge.node.title.english,
-            ))
+            relations.append(
+                CachedRelation(
+                    id=edge.node.id,
+                    relation_type=edge.relationType.value,
+                    title_romaji=edge.node.title.romaji,
+                    title_english=edge.node.title.english,
+                )
+            )
 
     return CachedMedia(
         id=media.id,
@@ -277,12 +295,12 @@ def media_to_cached(media: Media) -> CachedMedia:
     )
 
 
-def entry_to_cached(entry: "MediaListEntry") -> CachedUserEntry:
+def entry_to_cached(entry: MediaListEntry) -> CachedUserEntry:
     """Convert MediaListEntry to cached version."""
     return CachedUserEntry(
         id=entry.id,
         media_id=entry.mediaId,
-        status=entry.status,
+        status=entry.status if entry.status is not None else "",
         score=entry.personal_rating,
         progress=entry.progress,
         started_at=entry.startedAt.model_dump() if entry.startedAt else None,

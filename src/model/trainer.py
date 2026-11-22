@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.model_selection import KFold, cross_val_score
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import cross_val_score, KFold
-from typing import Any
 
 from src.anilist.models import (
     AnimeFeatures,
-    CacheMetadata,
     CachedMedia,
     CachedUserEntry,
     TasteDriver,
@@ -22,10 +22,24 @@ class FeatureExtractor:
     """Extract feature vectors from anime data."""
 
     KNOWN_GENRES = [
-        "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy",
-        "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery",
-        "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports",
-        "Supernatural", "Thriller",
+        "Action",
+        "Adventure",
+        "Comedy",
+        "Drama",
+        "Ecchi",
+        "Fantasy",
+        "Horror",
+        "Mahou Shoujo",
+        "Mecha",
+        "Music",
+        "Mystery",
+        "Psychological",
+        "Romance",
+        "Sci-Fi",
+        "Slice of Life",
+        "Sports",
+        "Supernatural",
+        "Thriller",
     ]
 
     def __init__(
@@ -81,20 +95,24 @@ class FeatureExtractor:
             self._feature_names.extend(["format_TV", "format_MOVIE", "format_OVA", "format_ONA"])
 
         if self._include_metadata:
-            self._feature_names.extend([
-                "season_year",
-                "episodes",
-                "duration",
-                "popularity",
-                "community_score",
-            ])
+            self._feature_names.extend(
+                [
+                    "season_year",
+                    "episodes",
+                    "duration",
+                    "popularity",
+                    "community_score",
+                ]
+            )
 
         if self._include_source:
-            self._feature_names.extend([
-                "source_original",
-                "source_manga",
-                "source_light_novel",
-            ])
+            self._feature_names.extend(
+                [
+                    "source_original",
+                    "source_manga",
+                    "source_light_novel",
+                ]
+            )
 
     def transform(self, media: CachedMedia) -> AnimeFeatures:
         """Convert CachedMedia to AnimeFeatures."""
@@ -230,26 +248,31 @@ class TasteModel:
             n_iter_no_change=20,
             random_state=42,
         )
-        self.pipeline = Pipeline([
-            ("gbr", gbr),
-        ])
+        self.pipeline = Pipeline(
+            [
+                ("gbr", gbr),
+            ]
+        )
         self.pipeline.fit(X, y, gbr__sample_weight=weights)
 
         self._is_trained = True
 
         y_pred = self.pipeline.predict(X)
-        self._train_preds = y_pred.tolist()
+        self._train_preds = np.asarray(y_pred).tolist()
         self._train_targets = y.tolist()
 
         n_splits = min(5, len(X))
         if n_splits >= 3 and len(X) >= 10:
             cv_scores = cross_val_score(
-                self.pipeline, X, y, cv=KFold(n_splits=n_splits, shuffle=True, random_state=42),
-                scoring="neg_mean_squared_error"
+                self.pipeline,
+                X,
+                y,
+                cv=KFold(n_splits=n_splits, shuffle=True, random_state=42),
+                scoring="neg_mean_squared_error",
             )
             cv_rmse = float(np.sqrt(-cv_scores.mean()))
         else:
-            cv_rmse = float('nan')
+            cv_rmse = float("nan")
 
         train_rmse = np.sqrt(np.mean((y - y_pred) ** 2))
 
@@ -297,7 +320,7 @@ class TasteModel:
 
         # Confidence based on training residual std (if available)
         confidence = 1.0  # Default
-        if hasattr(self, '_train_preds') and self._train_preds:
+        if hasattr(self, "_train_preds") and self._train_preds:
             residuals = np.array(self._train_targets) - np.array(self._train_preds)
             confidence = float(np.std(residuals))
 
@@ -317,7 +340,9 @@ class TasteModel:
         predictions = self.pipeline.predict(X)
         return [float(p) for p in predictions]  # No clamp - let ranking be natural
 
-    def predict_batch_with_confidence(self, media_list: list[CachedMedia]) -> list[tuple[float, float]]:
+    def predict_batch_with_confidence(
+        self, media_list: list[CachedMedia]
+    ) -> list[tuple[float, float]]:
         """Predict ratings with confidence for multiple anime."""
         if not self._is_trained or self.pipeline is None:
             raise RuntimeError("Model not trained. Call train() first.")
@@ -339,7 +364,7 @@ class TasteModel:
         weights = gbr_model.feature_importances_
 
         drivers = []
-        for name, weight in zip(feature_names, weights):
+        for name, weight in zip(feature_names, weights, strict=False):
             if abs(weight) < 0.01:  # Skip negligible weights
                 continue
 
@@ -365,18 +390,22 @@ class TasteModel:
                 feature_type = "metadata"
                 description = f"Source: {name[7:]}"
 
-            drivers.append(TasteDriver(
-                feature=name,
-                weight=float(weight),
-                feature_type=feature_type,
-                description=description,
-                is_positive=weight > 0,
-            ))
+            drivers.append(
+                TasteDriver(
+                    feature=name,
+                    weight=float(weight),
+                    feature_type=feature_type,
+                    description=description,
+                    is_positive=weight > 0,
+                )
+            )
 
         drivers.sort(key=lambda d: d.abs_weight, reverse=True)
         return drivers[:top_k]
 
-    def explain_prediction(self, media: CachedMedia, top_k: int = 5) -> list[tuple[str, float, str]]:
+    def explain_prediction(
+        self, media: CachedMedia, top_k: int = 5
+    ) -> list[tuple[str, float, str]]:
         """Explain why an anime got its predicted score."""
         if not self._is_trained or self.pipeline is None:
             return []
@@ -389,7 +418,7 @@ class TasteModel:
         weights = gbr_model.feature_importances_
 
         contributions = []
-        for i, (name, value) in enumerate(zip(feature_names, feature_vector)):
+        for i, (name, value) in enumerate(zip(feature_names, feature_vector, strict=False)):
             if value == 0:
                 continue
             contribution = value * weights[i]
@@ -419,7 +448,9 @@ class TasteModel:
             else:
                 desc = name
 
-            contributions.append((desc, float(contribution), "positive" if contribution > 0 else "negative"))
+            contributions.append(
+                (desc, float(contribution), "positive" if contribution > 0 else "negative")
+            )
 
         contributions.sort(key=lambda x: abs(x[1]), reverse=True)
         return contributions[:top_k]
