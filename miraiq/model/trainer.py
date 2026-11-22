@@ -18,13 +18,13 @@ from sklearn.model_selection import KFold, cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.anilist.models import (
+from miraiq.anilist.models import (
     AnimeFeatures,
     CachedMedia,
     CachedUserEntry,
     TasteDriver,
 )
-from src.cache.cache import CacheManager
+from miraiq.cache.cache import CacheManager
 
 
 class FeatureExtractor:

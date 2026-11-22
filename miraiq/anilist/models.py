@@ -561,3 +561,53 @@ class RecommendationResult(BaseModel):
     @property
     def display_title(self) -> str:
         return self.media.display_title
+
+    def to_dict(self) -> dict:
+        """Serialize to a flat dict friendly for a React/HTTP frontend.
+
+        Media fields (including cover/banner URLs) are flattened to top level
+        alongside the prediction fields so a backend can return everything the
+        frontend needs in one payload.
+        """
+        m = self.media.model_dump()
+        avg_score = m.get("average_score")
+        return {
+            # --- media (flattened) ---
+            "id": m.get("id"),
+            "title_romaji": m.get("title_romaji"),
+            "title_english": m.get("title_english"),
+            "title_native": m.get("title_native"),
+            "display_title": self.display_title,
+            "format": m.get("format"),
+            "status": m.get("status"),
+            "season_year": m.get("season_year"),
+            "season": m.get("season"),
+            "episodes": m.get("episodes"),
+            "duration": m.get("duration"),
+            "genres": m.get("genres"),
+            "tag_ranks": m.get("tag_ranks"),
+            "main_studios": m.get("main_studios"),
+            "all_studios": m.get("all_studios"),
+            "average_score": avg_score,
+            "community_score": round(avg_score / 10.0, 2)
+            if avg_score is not None
+            else None,
+            "popularity": m.get("popularity"),
+            "favourites": m.get("favourites"),
+            "is_adult": m.get("is_adult"),
+            "source": m.get("source"),
+            "description": m.get("description"),
+            "cover_image": m.get("cover_image"),
+            "banner_image": m.get("banner_image"),
+            "site_url": m.get("site_url"),
+            "synonyms": m.get("synonyms"),
+            "relations": m.get("relations"),
+            # --- prediction ---
+            "predicted_score": self.predicted_score,
+            "community_score_pred": self.community_score,
+            "score_difference": self.score_difference,
+            "is_planning": self.is_planning,
+            "is_sequel_without_prequel": self.is_sequel_without_prequel,
+            "prequel_title": self.prequel_title,
+            "similar_to": self.similar_to,
+        }

@@ -7,7 +7,7 @@ from typing import Any
 
 import orjson
 
-from src.anilist.models import (
+from miraiq.anilist.models import (
     CachedMedia,
     CachedUserEntry,
     CacheMetadata,
@@ -202,9 +202,7 @@ class CacheManager:
         data = [driver.model_dump() for driver in drivers]
         file_path.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
-    def load_taste_drivers(
-        self, username: str, model_name: str | None = None
-    ) -> list[TasteDriver]:
+    def load_taste_drivers(self, username: str, model_name: str | None = None) -> list[TasteDriver]:
         """Load learned taste drivers."""
         file_path = self._taste_drivers_file(username, model_name)
         if not file_path.exists():
@@ -223,9 +221,10 @@ class CacheManager:
 
     def model_exists(self, username: str, model_name: str | None = None) -> bool:
         """Check if trained model exists."""
-        return self._model_file(username, model_name).exists() or self._legacy_model_file(
-            username, model_name
-        ).exists()
+        return (
+            self._model_file(username, model_name).exists()
+            or self._legacy_model_file(username, model_name).exists()
+        )
 
     def list_available_models(self, username: str) -> list[str]:
         """List all trained model names available for a user."""

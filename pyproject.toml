@@ -47,11 +47,11 @@ dev = [
 ]
 
 [project.scripts]
-miraiq = "src.__main__:main"
+miraiq = "miraiq.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*"]
+include = ["miraiq*"]
 
 [tool.black]
 line-length = 100

@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from src.anilist.models import (
+from miraiq.anilist.models import (
     CachedMedia,
     CachedUserEntry,
     RecommendationResult,
 )
-from src.cache.cache import CacheManager
-from src.model.trainer import FeatureExtractor, TasteModel
+from miraiq.cache.cache import CacheManager
+from miraiq.model.trainer import FeatureExtractor, TasteModel
 
 # Known Chinese/Korean studio name patterns (for filtering)
 CHINESE_KOREAN_STUDIO_PATTERNS = [

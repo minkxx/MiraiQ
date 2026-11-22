@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 import httpx
 import orjson
 
-from src.anilist.models import (
+from miraiq.anilist.models import (
     CachedMedia,
     CachedRelation,
     CachedUserEntry,

@@ -20,9 +20,9 @@ from typing import Any
 import numpy as np
 from sklearn.model_selection import KFold
 
-from src.anilist.models import CachedMedia, CachedUserEntry
-from src.cache.cache import CacheManager
-from src.model.trainer import REGRESSORS, FeatureExtractor, TasteModel
+from miraiq.anilist.models import CachedMedia, CachedUserEntry
+from miraiq.cache.cache import CacheManager
+from miraiq.model.trainer import REGRESSORS, FeatureExtractor, TasteModel
 
 HIT_AT = (10, 20, 50)
 
@@ -240,9 +240,7 @@ def evaluate(
             )
             baseline_maes.append(float(np.mean(np.abs(np.array(test_scores) - baseline_pred))))
 
-        candidate_media = [
-            m for m in catalog if m.id not in (all_watched_ids - test_ids)
-        ]
+        candidate_media = [m for m in catalog if m.id not in (all_watched_ids - test_ids)]
 
         for model_name in model_names:
             model = _train_on(train_entries, catalog, REGRESSORS[model_name])
@@ -290,9 +288,7 @@ def evaluate(
                     hit_rates.setdefault(n, []).append(hits / max(len(test_ids), 1))
 
     # Average hit rates across folds.
-    report.hit_rate_at_n = {
-        n: float(np.mean(vals)) for n, vals in hit_rates.items()
-    }
+    report.hit_rate_at_n = {n: float(np.mean(vals)) for n, vals in hit_rates.items()}
     if baseline_rmses:
         report.baseline_rmse = float(np.mean(baseline_rmses))
         report.baseline_mae = float(np.mean(baseline_maes))

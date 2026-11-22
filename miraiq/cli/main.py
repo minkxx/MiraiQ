@@ -10,15 +10,15 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from src.anilist.sync import run_fetch_catalog, run_sync
-from src.cache.cache import CacheManager
-from src.model.evaluate import evaluate as run_evaluation
-from src.model.evaluate import format_report
-from src.model.recommender import (
+from miraiq.anilist.sync import run_fetch_catalog, run_sync
+from miraiq.cache.cache import CacheManager
+from miraiq.model.evaluate import evaluate as run_evaluation
+from miraiq.model.evaluate import format_report
+from miraiq.model.recommender import (
     RecommendationFilters,
     load_engine,
 )
-from src.model.trainer import REGRESSORS, train_model
+from miraiq.model.trainer import REGRESSORS, train_model
 
 app = typer.Typer(
     name="miraiq",

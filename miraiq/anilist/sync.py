@@ -7,9 +7,9 @@ from datetime import datetime
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
-from src.anilist.client import AniListClient, RateLimiter, entry_to_cached, media_to_cached
-from src.anilist.models import CachedMedia, CacheMetadata
-from src.cache.cache import CacheManager
+from miraiq.anilist.client import AniListClient, RateLimiter, entry_to_cached, media_to_cached
+from miraiq.anilist.models import CachedMedia, CacheMetadata
+from miraiq.cache.cache import CacheManager
 
 console = Console()
 
