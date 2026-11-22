@@ -1,0 +1,32 @@
+{
+    // Python environment
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+
+    // Ruff linting
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+        }
+    },
+
+    // Ruff as the default formatter for Python
+    "editor.formatOnSave": true,
+
+    // Pylance / Python language server
+    "python.languageServer": "Pylance",
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.diagnosticMode": "workspace",
+
+    // Formatting
+    "editor.rulers": [100],
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+
+    // Ruff config location
+    "ruff.config": "pyproject.toml",
+    "ruff.lineLength": 100
+}
