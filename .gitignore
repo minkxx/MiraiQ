@@ -1,6 +1,8 @@
 .cache/
-dist/
+dist
 __pycache__/
 .venv/
 
 *.egg-info
+
+node_modules
