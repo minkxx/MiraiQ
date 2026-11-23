@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 from flask import Flask
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from .api.v1 import routes  # noqa: F401
 from .api.v1.bp import v1_bp  # noqa: E402
